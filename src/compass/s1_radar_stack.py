@@ -236,7 +236,7 @@ def prune_dataframe(data, id_col, id_list):
 
 def create_runconfig(burst, safe, orbit_path,
                      dem_file, work_dir, pol, flatten,
-                     lines_per_block, is_reference=False):
+                     lines_per_block, ref_date, is_reference=False):
 
     yaml_path = f'{helpers.WORKFLOW_SCRIPTS_DIR}/defaults/s1_cslc_radar.yaml'
     with open(yaml_path, 'r') as stream:
@@ -256,7 +256,7 @@ def create_runconfig(burst, safe, orbit_path,
     ref_burst['is_reference'] = is_reference
 
     if not is_reference:
-        ref_burst['file_path'] = work_dir
+        ref_burst['file_path'] = f'{work_dir}/{burst.burst_id}/{ref_date}'
 
     # Product path
     product['product_path'] = work_dir
@@ -343,41 +343,41 @@ def main(slc_dir, dem_file, burst_id, ref_date=None, orbit_dir=None,
     if burst_id is not None:
         burst_map = prune_dataframe(burst_map, 'burst_id', burst_id)
 
-    # Create the reference runconfigs only for the reference file
+    # Create runconfigs and runfiles for the reference only
     orbit_path = get_orbit_file_from_list(ref_file,
                                           glob.glob(f'{orbit_dir}/S1*'))
     for subswath in i_subswath:
         bursts = load_bursts(ref_file, orbit_path, subswath)
         for burst in bursts:
             if burst.burst_id in list(set(burst_map['burst_id'])):
-                ref_runconfig_path = create_runconfig(burst, safe, orbit_path,
+                ref_runconfig_path = create_runconfig(burst, ref_file, orbit_path,
                                                       dem_file, work_dir, pol,
                                                       flatten,
-                                                      lines_per_block,
+                                                      lines_per_block, ref_date,
                                                       is_reference=True)
+                date_str = burst.sensing_start.strftime("%Y%m%d")
+                runfile_name = f'{ref_run_dir}/run_{date_str}_{burst.burst_id}.sh'
+                with open(runfile_name, 'w') as rsh:
+                    path = os.path.dirname(os.path.realpath(__file__))
+                    rsh.write(f'python {path}/s1_cslc.py {ref_runconfig_path} --grid-type radar\n')
 
-    # Start to geocode bursts
-    # zip_file = sorted(glob.glob(f'{slc_dir}/S1*zip'))
-    # for safe in zip_file:
-    #     orbit_path = get_orbit_file_from_list(safe,
-    #                                           glob.glob(
-    #                                           f'{orbit_dir}/S1*'))
-        # for subswath in i_subswath:
-        #     bursts = load_bursts(safe, orbit_path, subswath)
-        #     for burst in bursts:
-        #         if burst.burst_id in list(set(burst_map['burst_id'])):
-        #             sec_runconfig_path = create_runconfig(burst, safe, orbit_path,
-        #                                                   dem_file, work_dir, pol, flatten,
-        #                                                   lines_per_block, is_reference=False)
-        #             date_str = burst.sensing_start.strftime("%Y%m%d")
-        #             runfile_name = f'{ref_run_dir}/run_{date_str}_{burst.burst_id}.sh'
-        #             with open(runfile_name, 'w') as rsh:
-        #                   path = os.path.dirname(os.path.realpath(__file__))
-        #                   rsh.write(f'python {path}/s1_cslc.py {ref_runconfig_path} --grid-type radar\n')
-        #             runfile_name = f'{sec_run_dir}/run_{date_str}_{burst.burst_id}.sh'
-        #             with open(runfile_name, 'w') as rsh:
-        #                   path = os.path.dirname(os.path.realpath(__file__))
-        #                   rsh.write(f'python {path}/s1_cslc.py {sec_runconfig_path} --grid-type radar\n')
+    # Create the runconfigs and runfiles for all the secondaries
+    zip_file = sorted(glob.glob(f'{slc_dir}/S1*zip'))
+    for safe in zip_file:
+        orbit_path = get_orbit_file_from_list(safe,
+                                              glob.glob(f'{orbit_dir}/S1*'))
+        for subswath in i_subswath:
+             bursts = load_bursts(safe, orbit_path, subswath)
+             for burst in bursts:
+                 if burst.burst_id in list(set(burst_map['burst_id'])):
+                    sec_runconfig_path = create_runconfig(burst, safe, orbit_path,
+                                                          dem_file, work_dir, pol, flatten,
+                                                          lines_per_block, ref_date, is_reference=False)
+                    date_str = burst.sensing_start.strftime("%Y%m%d")
+                    runfile_name = f'{sec_run_dir}/run_{date_str}_{burst.burst_id}.sh'
+                    with open(runfile_name, 'w') as rsh:
+                         path = os.path.dirname(os.path.realpath(__file__))
+                         rsh.write(f'python {path}/s1_cslc.py {sec_runconfig_path} --grid-type radar\n')
 
 
 if __name__ == '__main__':
