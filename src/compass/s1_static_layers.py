@@ -1,9 +1,10 @@
 import re
 import time
 
+import isce3
 import journal
 
-from compass import s1_geocode_metadata, s1_rdr2geo
+from osgeo import gdal
 from compass.utils.geo_runconfig import GeoRunConfig
 from compass.utils.helpers import (bursts_grouping_generator, get_module_name,
                                    get_time_delta_str)
@@ -55,6 +56,9 @@ def run(cfg: GeoRunConfig):
     info_channel = journal.info(f"{module_name}.run")
     info_channel.log(f"Starting {module_name} burst")
 
+    # Extract which layers to generate
+    rdr2geo_cfg = cfg.rdr2geo_params
+
     # Start tracking processing time
     t_start = time.perf_counter()
 
@@ -66,9 +70,47 @@ def run(cfg: GeoRunConfig):
         info_channel.log(f'Starting geocoding of {burst_id} for {date_str}')
 
         # Generate required static layers
-        rdr2geo_cfg = _make_rdr2geo_cfg(cfg.yaml_string)
-        s1_rdr2geo.run(rdr2geo_cfg, burst, save_in_scratch=True)
-        s1_geocode_metadata.run(cfg, burst, fetch_from_scratch=True)
+        # rdr2geo_cfg = _make_rdr2geo_cfg(cfg.yaml_string)
+        # s1_rdr2geo.run(rdr2geo_cfg, burst, save_in_scratch=True)
+        # s1_geocode_metadata.run(cfg, burst, fetch_from_scratch=True)
+
+        # Generate static layers using Gustavo's get_radar_grid
+        geogrid = cfg.geogrids[burst_id]
+        dem_raster = isce3.io.Raster(cfg.dem)
+        radar_grid = burst.as_isce3_radargrid()
+        native_doppler = burst.doppler.lut2d
+        grid_doppler = isce3.core.LUT2d()
+
+        topo_output = {file_name_x: (rdr2geo_cfg.compute_longitude, gdal.GDT_Float64),
+                       file_name_y: (rdr2geo_cfg.compute_latitude, gdal.GDT_Float64),
+                       file_name_z: (rdr2geo_cfg.compute_height, gdal.GDT_Float64),
+                       file_name_layover: (
+                       cfg.rdr2geo_params.compute_layover_shadow_mask,
+                       gdal.GDT_Byte),
+                       file_name_local_incidence: (
+                       rdr2geo_cfg.compute_local_incidence_angle,
+                       gdal.GDT_Float32),
+                       file_name_los_east: (
+                       rdr2geo_cfg.compute_ground_to_sat_east, gdal.GDT_Float32),
+                       file_name_los_north: (
+                       rdr2geo_cfg.compute_ground_to_sat_north, gdal.GDT_Float32),
+                       }
+        raster_list = [
+            isce3.io.Raster(f'{output_path}/{fname}.rdr', geogrid.width,
+                            geogrid.length, 1, dtype, 'ENVI')
+            if enabled else None
+            for fname, (enabled, dtype) in topo_output.items()]
+
+        (x_raster, y_raster, z_raster, layover_shadow_raster,
+         local_incident_angle_raster, los_east_raster,
+         los_north_raster) = raster_list
+
+        isce3.geogrid.get_radar_grid(radar_grid.lookside, burst.wavelength,
+                                     dem_raster, geogrid, burst.orbit,
+                                     native_doppler, grid_doppler,
+                                     local_incidence_angle_raster=local_incident_angle_raster,
+                                     lo_unit_vector_x_raster=los_east_raster,
+                                     los_unit_vector_y_raster=los_north_raster)
 
     dt = get_time_delta_str(t_start)
     info_channel.log(f"{module_name} burst successfully ran in {dt} (hr:min:sec)")
