@@ -10,6 +10,14 @@ from compass.utils.helpers import (bursts_grouping_generator, get_module_name,
                                    get_time_delta_str)
 from compass.utils.yaml_argparse import YamlArgparse
 
+file_name_los_east = 'los_east'
+file_name_los_north = 'los_north'
+file_name_local_incidence = 'local_incidence_angle'
+file_name_layover = 'layover_shadow_mask'
+file_name_x = 'x'
+file_name_y = 'y'
+file_name_z = 'z'
+
 
 def _make_rdr2geo_cfg(yaml_runconfig_str):
     '''
@@ -81,6 +89,16 @@ def run(cfg: GeoRunConfig):
         native_doppler = burst.doppler.lut2d
         grid_doppler = isce3.core.LUT2d()
 
+        date_str = burst.sensing_start.strftime("%Y%m%d")
+        burst_id = str(burst.burst_id)
+
+        # init output directory in product_path
+        burst_id_date_key = (burst_id, date_str)
+
+        out_paths = cfg.output_paths[burst_id_date_key]
+        output_path = out_paths.output_directory
+        output_path = out_paths.scratch_directory
+
         topo_output = {file_name_x: (rdr2geo_cfg.compute_longitude, gdal.GDT_Float64),
                        file_name_y: (rdr2geo_cfg.compute_latitude, gdal.GDT_Float64),
                        file_name_z: (rdr2geo_cfg.compute_height, gdal.GDT_Float64),
@@ -96,7 +114,7 @@ def run(cfg: GeoRunConfig):
                        rdr2geo_cfg.compute_ground_to_sat_north, gdal.GDT_Float32),
                        }
         raster_list = [
-            isce3.io.Raster(f'{output_path}/{fname}.rdr', geogrid.width,
+            isce3.io.Raster(f'{output_path}/{fname}.geo', geogrid.width,
                             geogrid.length, 1, dtype, 'ENVI')
             if enabled else None
             for fname, (enabled, dtype) in topo_output.items()]
